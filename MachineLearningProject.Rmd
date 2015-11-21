@@ -1,0 +1,120 @@
+---
+title: "Practical Machine Learning - Quantified Self Project"
+author: "James Hookham"
+date: "21 November 2015"
+output: html_document
+---
+
+# Abstract
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+# Getting and Cleaning Data
+
+## Getting the Data
+
+For this project, we will need a number of packages which we have discussed over the course of the Practical Machine Learning Course. We begin by loading them in the R workspace along with the required data set which is available from:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+and
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+```{r}
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+library(corrplot)
+library(e1071)
+
+training <- read.csv("pml-training.csv")
+testing <- read.csv("pml-testing.csv")
+```
+
+## Cleaning the Data
+
+Both the training and testing sets contain missing values so our first port of call is to remove the columns that contain missing values: 
+
+```{r}
+training <- training[, colSums(is.na(training)) == 0] 
+testing <- testing[, colSums(is.na(testing)) == 0] 
+```
+
+Of the 160 variables in the training data set, many of them do not contribute to the accelerometer measurements, so we use the following code to remove them from our data. Remember that we are interested in predicting the ```classe``` variable from the others, so we should make sure that this variable is kept in the cleaned data!
+
+```{r}
+classe <- training$classe
+trainingmvals <- grepl("^X|timestamp|window", names(training))
+training <- training[, !trainingmvals]
+mytraining <- training[, sapply(training, is.numeric)]
+mytraining$classe <- classe
+testingmvals <- grepl("^X|timestamp|window", names(testing))
+testing <- testing[, !testingmvals]
+mytesting <- testing[, sapply(testing, is.numeric)]
+dim(mytraining)
+dim(mytesting)
+```
+
+As we can see, the cleaned ```mytraining``` data set has 19622 records with 53 fields compared to the 20 records and 53 fields of the ```mytraining``` data set. 
+
+The final stage of our data cleaning process is to split cleaned training data set (```mytraining```) into our pure and validation training sets which have 70% and 30% respectively. 
+
+```{r}
+set.seed(22519) 
+trainclasse <- createDataPartition(mytraining$classe, p=0.70, list=F)
+trainingdata <- mytraining[trainclasse, ]
+testingdata <- mytraining[-trainclasse, ]
+```
+
+The purpose of the validation set will be for cross validation.
+
+# Prediction with Random Forest
+
+I have chosen the Random Forest algorithm and have applied a 5-fold cross validation on the validation set. 
+
+```{r}
+treeModel <- rpart(classe ~ ., data=trainingdata, method="class")
+prp(treeModel)
+```
+
+```{r}
+fitcontrol <- trainControl(method="cv", 5)
+fitmodel <- train(classe ~ ., data=trainingdata, method="rf", trControl=fitcontrol, ntree=250)
+```
+
+Using the following, we estimate the accuracy of our model when applied to the validation set:
+
+```{r}
+fitpredict <- predict(fitmodel, testingdata)
+confusionMatrix(testingdata$classe, fitpredict)
+accuracy <- postResample(fitpredict, testingdata$classe)
+outofsample <- 1 - as.numeric(confusionMatrix(testingdata$classe, fitpredict)$overall[1])
+accuracy
+outofsample
+```
+
+Hence, the accuracy of our model is 99.3% and has an out-of-sample error of 0.7%.
+
+# Predicting Results on the Test Data
+
+As we can see from the above chunk of code, the Random Forest yielded a 99.3% accuracy. The expected out-of-sample error is therefore 0.7%. Finall, we apply our model to the testing data set:
+
+```{r}
+result <- predict(fitmodel, mytesting[, -length(names(mytesting))])
+result
+```
+
+Finally, we write our results to a text file for submission:
+
+```{r}
+pml_write_files = function(x){
+    n = length(x)
+    for(i in 1:n){
+        filename = paste0("problem_id_",i,".txt")
+        write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+    }
+}
+
+```
